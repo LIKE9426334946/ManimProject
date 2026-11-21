@@ -47,12 +47,18 @@ class Step:
     purpose: str
 
 
-def row_reduce(matrix):
-    """每一步都用 E 左乘整个 [L | R]，因此始终有 L = R @ A。"""
+def row_reduce(matrix, rhs=None):
+    """对 [A | I] 求逆，或对 [A | b] 消元。每一步用 E 左乘整个增广矩阵。"""
     if np.shape(matrix) != (2, 2):
         raise ValueError("请给出两行两列的矩阵。")
     a = np.array([[Fraction(str(n)) for n in row] for row in matrix])
-    initial = np.hstack((a, IDENTITY))
+    right = IDENTITY
+    if rhs is not None:
+        values = np.asarray(rhs, dtype=object)
+        if values.shape not in ((2,), (2, 1)):
+            raise ValueError("常数列需要两个数。")
+        right = np.array([[Fraction(str(v))] for v in values.flat])
+    initial = np.hstack((a, right))
     state, steps = initial, []
     names = ("R₁", "R₂")
 
@@ -61,25 +67,31 @@ def row_reduce(matrix):
         state = elementary @ state
         steps.append(Step(elementary, state, rows, operation, purpose))
 
-    for pivot in range(2):
-        source = next((r for r in range(pivot, 2) if state[r, pivot] != 0), None)
+    pivot, missing = 0, None
+    for col in range(2):
+        source = next((r for r in range(pivot, 2) if state[r, col] != 0), None)
         if source is None:
-            return initial, steps, pivot
+            if missing is None:
+                missing = col
+            if rhs is None:
+                break
+            continue  # 解方程组时，这个变量是自由变量，继续检查下一列。
         if source != pivot:
             apply(IDENTITY[::-1].copy(), (0, 1), "R₁ ↔ R₂", "交换两行，取得非零主元")
-        if state[pivot, pivot] != 1:
+        if state[pivot, col] != 1:
             e = IDENTITY.copy()
-            e[pivot, pivot] = 1 / state[pivot, pivot]
+            e[pivot, pivot] = 1 / state[pivot, col]
             operation = linear_form((e[pivot, pivot],), (names[pivot],))
-            apply(e, (pivot,), f"{names[pivot]} ← {operation}", f"把第 {pivot + 1} 列的主元化为 1")
+            apply(e, (pivot,), f"{names[pivot]} ← {operation}", f"把第 {col + 1} 列的主元化为 1")
         other = 1 - pivot
-        if state[other, pivot] != 0:
+        if state[other, col] != 0:
             e = IDENTITY.copy()
-            e[other, pivot] = -state[other, pivot]
+            e[other, pivot] = -state[other, col]
             operation = linear_form((Fraction(1), e[other, pivot]), (names[other], names[pivot]))
-            purpose = f"把第 {pivot + 1} 列的 {scalar(state[other, pivot])} 消为 0"
+            purpose = f"把第 {col + 1} 列的 {scalar(state[other, col])} 消为 0"
             apply(e, (other,), f"{names[other]} ← {operation}", purpose)
-    return initial, steps, None
+        pivot += 1
+    return initial, steps, missing
 
 
 def label(value, size=28, color=INK):
@@ -119,7 +131,8 @@ def matrix_picture(values, augmented=False, color=INK):
                                        [outside, -0.91, 0], [inside, -0.91, 0]])
         frame.add(bracket)
     if augmented:
-        frame.add(Line(0.84 * DOWN, 0.84 * UP, color=MUTED, stroke_width=1.8))
+        divider = (columns[1] + columns[2]) / 2 if ncols >= 3 else 0.0
+        frame.add(Line([divider, -0.84, 0], [divider, 0.84, 0], color=MUTED, stroke_width=1.8))
     cells = VGroup()
     for (r, c), value in np.ndenumerate(values):
         ink = (TEAL, CORAL, GOLD, GOLD)[c] if augmented else color
